@@ -1,0 +1,18 @@
+# Node / сборка
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+
+# Секреты и локальные файлы
+.env
+.env.*
+*.log
+npm-debug.log*
+
+# VCS / IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store

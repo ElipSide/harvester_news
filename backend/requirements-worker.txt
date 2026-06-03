@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# CPU-only semantic stack. Do not install CUDA wheels on the server.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+numpy==1.26.4
+sentence-transformers==3.3.1

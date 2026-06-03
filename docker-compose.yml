@@ -1,0 +1,52 @@
+name: harvester_news_test_news
+
+services:
+  backend:
+    build: ./backend
+    container_name: test-news-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    expose:
+      - "8000"
+    volumes:
+      - ./backend/app:/app/app
+    networks:
+      - test_news_net
+
+  events-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    container_name: test-news-events-worker
+    restart: unless-stopped
+    command: python -m app.workers.events_worker
+    env_file:
+      - .env
+    volumes:
+      - ./backend/app:/app/app
+      - semantic_models:/models
+    depends_on:
+      - backend
+    networks:
+      - test_news_net
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: test-news-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6885:8080"
+    depends_on:
+      - backend
+    networks:
+      - test_news_net
+
+networks:
+  test_news_net:
+    name: test_news_net
+
+volumes:
+  semantic_models:
+    name: test_news_semantic_models

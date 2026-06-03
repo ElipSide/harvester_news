@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Секреты и локальные файлы
+.env
+.env.*
+*.log
+
+# Модели эмбеддингов (монтируются volume'ом, не в образ)
+models/
+semantic_models/
+
+# VCS / IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
