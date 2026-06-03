@@ -1,6 +1,7 @@
 import type {
   EventGraphResponse,
   EventListResponse,
+  EventRoleImpact,
   EventSource,
   Filters,
   FullGraphResponse,
@@ -107,8 +108,10 @@ export const api = {
     params.delete('date_to');
     return request<HomeResponse>('/news/home/fast-week', params);
   },
-  getEvents(filters: Filters, limit = 6, offset = 0, signal?: AbortSignal) {
-    return request<EventListResponse>('/news/events', buildEventParams(filters, limit, offset), signal);
+  getEvents(filters: Filters, limit = 6, offset = 0, signal?: AbortSignal, sort?: 'date_desc') {
+    const params = buildEventParams(filters, limit, offset);
+    if (sort) params.set('sort', sort);
+    return request<EventListResponse>('/news/events', params, signal);
   },
   getEventsGraph(filters: Filters, limit = 1000, signal?: AbortSignal) {
     const params = buildEventParams(filters, limit, 0);
@@ -138,8 +141,8 @@ export const api = {
     if (focusNewsId != null) params.set('focus_news_id', String(focusNewsId));
     return request<FullGraphResponse>('/news/events/full_graph', params, signal);
   },
-  getEventSources(eventId: number, signal?: AbortSignal) {
-    return request<{ items: EventSource[] }>(`/news/events/${eventId}/sources`, undefined, signal);
+  getEventDetail(eventId: number, signal?: AbortSignal) {
+    return request<{ sources: EventSource[]; impacts: EventRoleImpact[] }>(`/news/events/${eventId}/detail`, undefined, signal);
   },
   getFeatured() {
     const params = new URLSearchParams({ limit: '3' });

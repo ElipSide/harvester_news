@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.schemas.news import EventListResponse, NewsListResponse, NewsMetaResponse, TimelineResponse
 from app.services_news import debug_db, featured_news, list_news, news_by_id, news_meta, similar_news, timeline, top_read_news
-from app.services_events import event_sources, event_story, events_stats, full_event_graph, list_events, list_events_graph
+from app.services_events import event_detail, event_story, events_stats, full_event_graph, list_events, list_events_graph
 from app.services_home import home_background_payload, home_fast_week_payload, home_initial_payload, home_payload
 from app.services_cache import cache_get, cache_set
 
@@ -200,6 +200,7 @@ async def event_list_endpoint(
     date_from: date | None = None,
     date_to: date | None = None,
     role: str | None = Query(default=None, pattern="^(farmer|processor|trader|agroholding|exporter)$"),
+    sort: str | None = Query(default=None, pattern="^(date_desc)$"),
     limit: int = Query(default=6, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
@@ -215,6 +216,7 @@ async def event_list_endpoint(
             date_from=date_from,
             date_to=date_to,
             role=role,
+            sort=sort,
             limit=limit,
             offset=offset,
         )
@@ -262,11 +264,11 @@ async def event_stats_endpoint():
         raise _db_error(exc) from exc
 
 
-@router.get("/events/{event_id}/sources")
-async def event_sources_endpoint(event_id: int):
-    """Источники одного события — для выпадашки на странице чтения новости."""
+@router.get("/events/{event_id}/detail")
+async def event_detail_endpoint(event_id: int):
+    """Источники + impacts по ролям события — для шапки страницы чтения новости."""
     try:
-        return {"items": await event_sources(event_id)}
+        return await event_detail(event_id)
     except Exception as exc:
         raise _db_error(exc) from exc
 

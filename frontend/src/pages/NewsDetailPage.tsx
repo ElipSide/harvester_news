@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronDown, ChevronLeft, ExternalLink } from 'lucide-react';
-import type { EventSource, FullGraphResponse, NewsItem } from '../types';
+import { Activity, AlertTriangle, ArrowLeft, ChevronDown, ChevronLeft, ExternalLink, Eye, TrendingUp } from 'lucide-react';
+import type { EventRoleImpact, EventSource, FullGraphResponse, NewsItem } from '../types';
 import { api } from '../api/client';
 import { formatDate } from '../utils/format';
 import { topicClass } from '../utils/topic';
@@ -20,6 +20,14 @@ const ddmmyyyy = (raw: string) => {
 const readMinutes = (text: string | null | undefined): number => {
   const words = (text || '').trim().split(/\s+/).filter(Boolean).length;
   return Math.max(1, Math.round(words / 180));
+};
+
+// Склонение «новость / новости / новостей».
+const newsWord = (n: number): string => {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'новость';
+  if (m10 >= 2 && m10 <= 4 && !(m100 >= 12 && m100 <= 14)) return 'новости';
+  return 'новостей';
 };
 
 /**
@@ -75,10 +83,12 @@ export function NewsDetailPage({
   const SHOW_FULLTEXT = false;
   const [similar, setSimilar] = useState<NewsItem[]>([]);
   const [graph, setGraph] = useState<FullGraphResponse | null>(null);
-  // Выпадашка источников события (ленивая загрузка по клику на «N ист.»).
-  const [srcOpen, setSrcOpen] = useState(false);
+  // Источники + impacts события (для шапки): один запрос на загрузке страницы.
   const [sources, setSources] = useState<EventSource[] | null>(null);
-  const [srcLoading, setSrcLoading] = useState(false);
+  const [impacts, setImpacts] = useState<EventRoleImpact[]>([]);
+  const [srcOpen, setSrcOpen] = useState(false);          // выпадашка источников
+  const [impOpen, setImpOpen] = useState<string | null>(null);  // открытая категория impact
+  const [tagsExpanded, setTagsExpanded] = useState(false);      // раскрыты ли все темы
 
   useEffect(() => {
     setSimilar([]);
@@ -90,26 +100,38 @@ export function NewsDetailPage({
   useEffect(() => {
     setGraph(null);
     setSrcOpen(false);
+    setImpOpen(null);
+    setTagsExpanded(false);
     setSources(null);
+    setImpacts([]);
     if (!item) return;
     let cancelled = false;
     api.getEventsFullGraph(item.id).then((g) => { if (!cancelled) setGraph(g); }).catch(() => {});
     return () => { cancelled = true; };
   }, [item?.id]);
 
-  const toggleSources = (eventId: number) => {
-    setSrcOpen((open) => {
-      const next = !open;
-      if (next && sources === null && !srcLoading) {
-        setSrcLoading(true);
-        api.getEventSources(eventId)
-          .then((r) => setSources(r.items))
-          .catch(() => setSources([]))
-          .finally(() => setSrcLoading(false));
-      }
-      return next;
-    });
-  };
+  // Источники/impacts фокус-события — когда граф загрузился и нашёл событие.
+  const focusEventId = graph && graph.focus_event_id != null ? graph.focus_event_id : null;
+  useEffect(() => {
+    setSources(null);
+    setImpacts([]);
+    setSrcOpen(false);
+    setImpOpen(null);
+    if (focusEventId == null) return;
+    let cancelled = false;
+    api.getEventDetail(focusEventId)
+      .then((d) => { if (!cancelled) { setSources(d.sources); setImpacts(d.impacts); } })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [focusEventId]);
+
+  // Группировка impact-ов по категории для чипов риск/позитив/следить.
+  const IMP_CATS = [
+    { key: 'negative', word: 'риск', cls: 'neg' },
+    { key: 'positive', word: 'позитив', cls: 'pos' },
+    { key: 'watch', word: 'следить', cls: 'watch' },
+  ] as const;
+  const impByCat = (cat: string) => impacts.filter((i) => i.impact === cat);
 
   if (loading) {
     return (
@@ -147,28 +169,73 @@ export function NewsDetailPage({
         </div>
 
         <div className="ev2-meta">
-          {focusEvent
-            ? (
-              <>
-                <span className="ev2-mm">{ddmmyyyy(item.date)}</span>
+          {focusEvent ? (
+            <>
+              {/* Левая группа: дата · время · impact-чипы (клик → выпадашка) */}
+              <span className="ev2-mm">{ddmmyyyy(item.date)}</span>
+              <span className="ev2-readtime"><span className="ev2-dot">·</span><span className="ev2-mm">{readMin} мин</span></span>
+              {IMP_CATS.map((cat) => {
+                const roles = impByCat(cat.key);
+                if (!roles.length) return null;
+                const open = impOpen === cat.key;
+                return (
+                  <span key={cat.key} className="ev2-dot-wrap">
+                    <span className="ev2-dot">·</span>
+                    <span className="ev2-imp-wrap">
+                      <button
+                        type="button"
+                        className={`ev2-imp-chip ev2-imp-${cat.cls}${open ? ' open' : ''}`}
+                        onClick={() => { setImpOpen(open ? null : cat.key); setSrcOpen(false); }}
+                        aria-expanded={open}
+                      >
+                        {cat.cls === 'neg' && <AlertTriangle />}
+                        {cat.cls === 'pos' && <TrendingUp />}
+                        {cat.cls === 'watch' && <Activity />}
+                        <span className="ev2-imp-word">{cat.word}</span>
+                        <b className={`ev2-imp-n${roles.length === 1 ? ' ev2-imp-n-one' : ''}`}>{roles.length}</b>
+                        <ChevronDown className="ev2-imp-cv" />
+                      </button>
+                      {open && (
+                        <div className="ev2-imp-pop">
+                          <div className="ev2-imp-pop-hd">{cat.word} · {roles.map((r) => r.label).join(', ')}</div>
+                          {roles.map((r) => (
+                            <div key={r.role} className="ev2-imp-pop-row">
+                              <span className="ev2-imp-pop-role">{r.label}</span>
+                              {r.summary && <span className="ev2-imp-pop-sm">{r.summary}</span>}
+                              {r.action_hint && <span className="ev2-imp-pop-hint">{r.action_hint}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </span>
+                  </span>
+                );
+              })}
+
+              {/* Правая группа: просмотры · N новостей (клик → источники) */}
+              <span className="ev2-meta-r">
+                {item.views > 0 && (
+                  <span className="ev2-mm ev2-views"><Eye /> {item.views.toLocaleString('ru-RU')}</span>
+                )}
+                <span className="ev2-dot">·</span>
                 <span className="ev2-src-wrap">
                   <button
                     type="button"
                     className={`ev2-mm ev2-src-btn${srcOpen ? ' open' : ''}`}
-                    onClick={() => toggleSources(focusEvent.id)}
+                    onClick={() => { setSrcOpen((o) => !o); setImpOpen(null); }}
                     aria-expanded={srcOpen}
                     title="Показать источники"
                   >
-                    {focusEvent.src} ист.
+                    {focusEvent.src} {newsWord(focusEvent.src)}
                     <ChevronDown className="ev2-src-caret" />
                   </button>
                   {srcOpen && (
-                    <div className="ev2-src-pop">
-                      {srcLoading && <div className="ev2-src-empty">Загрузка…</div>}
-                      {!srcLoading && sources && sources.length === 0 && (
+                    <div className="ev2-src-pop ev2-src-pop-r">
+                      {sources === null && <div className="ev2-src-empty">Загрузка…</div>}
+                      {sources && sources.length === 0 && (
                         <div className="ev2-src-empty">Источники не найдены</div>
                       )}
-                      {!srcLoading && sources && sources.map((s) => {
+                      {sources && sources.map((s) => {
                         const inner = (
                           <>
                             <span className="ev2-src-name">{s.source || s.title || 'Источник'}</span>
@@ -189,16 +256,18 @@ export function NewsDetailPage({
                     </div>
                   )}
                 </span>
-                <span className="ev2-mm">{readMin} мин чтения</span>
-              </>
-            )
-            : (
-              <>
-                <span className="ev2-mm">{ddmmyyyy(item.date)}</span>
-                {item.source && <span className="ev2-mm">{item.source}</span>}
-                <span className="ev2-mm">{readMin} мин чтения</span>
-              </>
-            )}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="ev2-mm">{ddmmyyyy(item.date)}</span>
+              <span className="ev2-readtime"><span className="ev2-dot">·</span><span className="ev2-mm">{readMin} мин</span></span>
+              {item.source && <><span className="ev2-dot">·</span><span className="ev2-mm">{item.source}</span></>}
+              {item.views > 0 && (
+                <span className="ev2-meta-r"><span className="ev2-mm ev2-views"><Eye /> {item.views.toLocaleString('ru-RU')}</span></span>
+              )}
+            </>
+          )}
         </div>
 
         {item.link_photo && (
@@ -212,23 +281,28 @@ export function NewsDetailPage({
           ? <div className="ev2-dek ev2-body"><RichText text={bodyText} fallback={item.summary} /></div>
           : (dek && <div className="ev2-dek">{dek}</div>)}
 
-        {item.link_site && (
-          <a className="ev2-source" href={item.link_site} target="_blank" rel="noreferrer">
-            Открыть источник <ExternalLink />
-          </a>
-        )}
-
-        {hasTags && (
-          <div className="detail-tags-flat">
-            {[
-              ...item.regions.map((t) => ({ t, kind: 'region' })),
-              ...item.topics.map((t) => ({ t, kind: 'topic' })),
-              ...item.products.map((t) => ({ t, kind: 'product' })),
-            ].map(({ t, kind }) => (
-              <button key={`${kind}:${t}`} className={`ev-tag fc-${kind}`} onClick={() => onTagClick(t)}>{t}</button>
-            ))}
-          </div>
-        )}
+        {hasTags && (() => {
+          const allTags = [
+            ...item.regions.map((t) => ({ t, kind: 'region' })),
+            ...item.topics.map((t) => ({ t, kind: 'topic' })),
+            ...item.products.map((t) => ({ t, kind: 'product' })),
+          ];
+          const TAG_CAP = 4;
+          const shown = tagsExpanded ? allTags : allTags.slice(0, TAG_CAP);
+          const hidden = allTags.length - shown.length;
+          return (
+            <div className="detail-tags-flat">
+              {shown.map(({ t, kind }) => (
+                <button key={`${kind}:${t}`} className={`ev-tag fc-${kind}`} onClick={() => onTagClick(t)}>{t}</button>
+              ))}
+              {(hidden > 0 || tagsExpanded) && allTags.length > TAG_CAP && (
+                <button type="button" className="ev-tag ev-tag-more" onClick={() => setTagsExpanded((v) => !v)}>
+                  {tagsExpanded ? 'свернуть' : `ещё ${hidden}`}
+                </button>
+              )}
+            </div>
+          );
+        })()}
 
         {graph
           ? <StoryTimeline graph={graph} focusEventId={graph.focus_event_id} onOpenNews={onOpenNews} />

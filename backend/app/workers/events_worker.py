@@ -14,7 +14,7 @@ from psycopg import sql
 from app.services.event_tables import ensure_event_schema, write_job_state
 from app.services.topic_index import reset_topic_index, sync_topic_index_once, topic_index_stats, rebuild_topic_daily_stats
 from app.db.db_ext import get_conn
-from app.services_events import process_events_once
+from app.services_events import process_events_once, prune_stale_inactive_events
 from app.services.event_graph import rebuild_event_graph
 
 logging.basicConfig(
@@ -68,6 +68,13 @@ async def _run_once() -> dict[str, Any]:
         except Exception as exc:
             logger.exception("rebuild_event_graph failed: %s", exc)
             combined["story_graph"] = {"error": str(exc)}
+    # Чистим старые неактивные события, чтобы не копить мусор в БД.
+    if settings.event_prune_inactive_enabled:
+        try:
+            combined["pruned"] = await prune_stale_inactive_events()
+        except Exception as exc:
+            logger.exception("prune_stale_inactive_events failed: %s", exc)
+            combined["pruned"] = {"error": str(exc)}
     await write_job_state(
         "events_worker_last_run",
         {
@@ -80,13 +87,17 @@ async def _run_once() -> dict[str, Any]:
     return combined
 
 
-async def worker_loop(once: bool = False, reset: bool = False, drain: bool = False, sync_topics_only: bool = False, reset_topics: bool = False, sync_topic_stats_only: bool = False, rebuild_stories_only: bool = False) -> None:
+async def worker_loop(once: bool = False, reset: bool = False, drain: bool = False, sync_topics_only: bool = False, reset_topics: bool = False, sync_topic_stats_only: bool = False, rebuild_stories_only: bool = False, prune_only: bool = False) -> None:
     await open_pool()
     try:
         await ensure_event_schema()
         if reset:
             logger.warning("reset requested: truncating event tables before processing")
             await reset_event_tables()
+
+        if prune_only:
+            logger.info("pruning stale inactive events: %s", await prune_stale_inactive_events())
+            return
 
         if rebuild_stories_only:
             logger.info("rebuilding event story graph on current events")
@@ -167,6 +178,7 @@ def main() -> None:
     parser.add_argument("--reset-topics", action="store_true", help="Clear normalized topic index before syncing")
     parser.add_argument("--sync-topic-stats", action="store_true", help="Only rebuild pre-aggregated daily topic stats and exit")
     parser.add_argument("--rebuild-stories", action="store_true", help="Only rebuild the event story graph (links + stories) on current events and exit")
+    parser.add_argument("--prune", action="store_true", help="Only delete stale inactive (ignored_weak) events older than the configured window and exit")
     args = parser.parse_args()
 
     loop = asyncio.new_event_loop()
@@ -184,6 +196,7 @@ def main() -> None:
         reset_topics=args.reset_topics,
         sync_topic_stats_only=args.sync_topic_stats,
         rebuild_stories_only=args.rebuild_stories,
+        prune_only=args.prune,
     ))
 
 

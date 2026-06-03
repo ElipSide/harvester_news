@@ -825,9 +825,10 @@ button,input{font:inherit;color:inherit;background:none;border:none;outline:none
 /* Settings button */
 .eg-settings-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:7px 11px;font-family:var(--sans);font-size:12.5px;font-weight:600;color:var(--ink-2);cursor:pointer;transition:var(--t-fast)}
 /* Кнопка фильтров в шапке графа (на месте бывшей шестерёнки настроек) */
-.eg-filters-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:7px 10px;color:var(--ink-2);cursor:pointer;transition:var(--t-fast)}
+.eg-filters-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:7px 12px;color:var(--ink-2);cursor:pointer;transition:var(--t-fast)}
 .eg-filters-btn:hover{background:var(--paper-2);border-color:var(--line-2);color:var(--ink)}
 .eg-filters-btn svg{width:16px;height:16px}
+.eg-filters-label{font-family:var(--sans);font-size:12.5px;font-weight:600;color:var(--ink-2);line-height:1}
 .eg-filters-c{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 4px;display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:700;color:#fff;background:var(--green);border:2px solid var(--bg);border-radius:100px}
 /* Кнопка-переключатель (мобильная шапка графа): показывает текущее, тап переключает */
 .eg-toggle-btn{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 16px;font-family:var(--sans);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;transition:var(--t-fast);white-space:nowrap}
@@ -1216,6 +1217,7 @@ svg.eg-graph{display:block;width:100%;height:auto}
   .eg-hd-r{width:100%;display:flex;gap:10px;align-items:center;flex-wrap:nowrap}
   .eg-toggle-btn{flex:0 0 auto}
   .eg-filters-btn{flex:0 0 auto;margin-left:auto;padding:8px 10px}
+  .eg-filters-label{display:none}      /* на мобиле кнопка фильтров — только иконка */
 
   .events-head h2{font-size:18px}
   .events-page-top h1{font-size:22px}
@@ -1300,9 +1302,33 @@ svg.eg-graph{display:block;width:100%;height:auto}
 .ev2-back:hover{background:var(--paper-2);color:var(--ink);border-color:var(--ink-3)}
 .ev2-back:active{transform:scale(.94)}
 .ev2-back svg{width:17px;height:17px}
-.ev2-meta{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-bottom:13px}
+.ev2-meta{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:13px}
 .ev2-sig{font-family:var(--mono);font-size:12.5px;font-weight:600}
 .ev2-mm{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.ev2-dot{color:var(--line-2);font-size:12px;user-select:none}
+.ev2-dot-wrap{display:contents}
+.ev2-meta-r{margin-left:auto;display:inline-flex;align-items:center;gap:9px}
+.ev2-views{display:inline-flex;align-items:center;gap:5px}
+.ev2-views svg{width:13px;height:13px;color:var(--ink-3)}
+/* impact-чипы (риск/позитив/следить) — клик открывает выпадашку */
+.ev2-imp-wrap{position:relative;display:inline-flex}
+.ev2-imp-chip{display:inline-flex;align-items:center;gap:4px;background:none;border:none;padding:1px 0;margin:0;font:inherit;font-size:12px;font-weight:600;cursor:pointer;line-height:1;transition:opacity var(--t-fast)}
+.ev2-imp-chip>span{border-bottom:1px dashed currentColor;padding-bottom:1px}
+.ev2-imp-chip:hover{opacity:.78}
+.ev2-imp-chip svg{width:13px;height:13px}
+.ev2-imp-chip .ev2-imp-cv{width:12px;height:12px;opacity:.7;border-bottom:none;transition:transform var(--t-fast)}
+.ev2-imp-chip.open .ev2-imp-cv{transform:rotate(180deg)}
+.ev2-imp-n{font-family:var(--mono);font-size:11px;font-weight:700}
+.ev2-imp-neg{color:#A1361B}
+.ev2-imp-pos{color:#1B7A3E}
+.ev2-imp-watch{color:#9B5510}
+.ev2-imp-pop{position:absolute;top:calc(100% + 7px);left:0;z-index:40;min-width:250px;max-width:360px;padding:11px 13px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:0 10px 28px rgba(15,17,20,.14)}
+.ev2-imp-pop-hd{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:lowercase;color:var(--ink-3);margin-bottom:8px}
+.ev2-imp-pop-row{padding:7px 0}
+.ev2-imp-pop-row + .ev2-imp-pop-row{border-top:1px solid var(--line)}
+.ev2-imp-pop-role{display:block;font-size:12.5px;font-weight:600;color:var(--ink)}
+.ev2-imp-pop-sm{display:block;font-size:12px;color:var(--ink-2);line-height:1.42;margin-top:2px}
+.ev2-imp-pop-hint{display:block;font-size:11px;color:var(--ink-3);font-style:italic;line-height:1.35;margin-top:3px}
 /* Источники события — кликабельный чип «N ист.» + выпадашка */
 .ev2-src-wrap{position:relative;display:inline-flex}
 .ev2-src-btn{display:inline-flex;align-items:center;gap:4px;background:none;border:none;padding:0;margin:0;cursor:pointer;color:var(--ink-2);border-bottom:1px dashed var(--line-2);transition:color var(--t-fast)}
@@ -1310,12 +1336,25 @@ svg.eg-graph{display:block;width:100%;height:auto}
 .ev2-src-caret{width:13px;height:13px;transition:transform var(--t-fast)}
 .ev2-src-btn.open .ev2-src-caret{transform:rotate(180deg)}
 .ev2-src-pop{position:absolute;top:calc(100% + 7px);left:0;z-index:40;min-width:260px;max-width:360px;max-height:300px;overflow-y:auto;padding:5px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:0 10px 28px rgba(15,17,20,.14)}
+.ev2-src-pop-r{left:auto;right:0}
 .ev2-src-empty{padding:9px 10px;font-size:12.5px;color:var(--ink-3)}
 .ev2-src-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;width:100%;text-align:left;padding:8px 10px;border:none;background:none;border-radius:8px;cursor:pointer;text-decoration:none;font:inherit;transition:background var(--t-fast)}
 .ev2-src-row:hover{background:var(--paper-2)}
 .ev2-src-name{font-size:13px;font-weight:600;color:var(--ink);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ev2-src-meta{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
 .ev2-src-ext{width:12px;height:12px;color:var(--green)}
+/* Мобилка: выпадашки impact/источников — во всю ширину мета-строки, не за экран.
+   Якорим к .ev2-meta (а не к узкому чипу), поэтому wrap'ы делаем static. */
+@media(max-width:600px){
+  .ev2-meta{position:relative;gap:8px}
+  .ev2-imp-wrap,.ev2-src-wrap{position:static}
+  .ev2-imp-pop,.ev2-src-pop,.ev2-src-pop-r{
+    left:0;right:0;width:auto;min-width:0;max-width:none;
+    max-height:60vh;overflow-y:auto;
+  }
+  .ev2-imp-chip,.ev2-src-btn{font-size:12.5px}
+  .ev2-meta-r{gap:8px}
+}
 .ev2-media{margin:2px 0 16px;max-height:200px;border-radius:12px;overflow:hidden;background:var(--paper-2);border:1px solid var(--line)}
 .ev2-media .ev2-img{width:100%;max-height:200px;object-fit:cover;display:block}
 .ev2-dek{color:var(--ink-2);font-size:15px;line-height:1.62;margin-bottom:4px}
@@ -1329,16 +1368,26 @@ svg.eg-graph{display:block;width:100%;height:auto}
 /* Чипы и таймлайн внутри карточки — без лишних боковых отступов */
 .ev-card2 .detail-tags-flat{padding:10px 0 4px}
 .ev-card2 .stl-wrap{margin-top:14px}
+/* Кнопка-чип «ещё N / свернуть» для тем */
+.ev-tag-more{background:var(--paper-2);color:var(--ink-3);border-color:transparent}
+.ev-tag-more:hover{background:var(--line);color:var(--ink-2)}
+/* На десктопе число у impact-чипа показываем только если ролей больше одной */
+.ev2-imp-n-one{display:none}
 /* Полный текст — отдельная карточка ниже */
 .detail-fulltext{margin-top:16px;padding:0}
 .detail-fulltext .detail-body{padding:22px 26px 6px}
 .detail-fulltext .source-link{margin:0 26px 22px}
 @media (max-width:640px){
   .ev-card2{padding:16px 15px 12px;border-radius:12px}
-  .ev2-head h1{font-size:20px;line-height:1.2}
+  .ev2-head h1{font-size:16px;line-height:1.22}
   .ev2-media{max-height:150px}
   .ev2-media .ev2-img{max-height:150px}
-  .ev2-dek{font-size:13.5px;line-height:1.55}
+  .ev2-dek{font-size:13.5px;line-height:1.5}
+  .ev2-body .rich-text{font-size:13.5px;line-height:1.5}
   .detail-fulltext .detail-body{padding:16px 15px 4px}
   .detail-fulltext .source-link{margin:0 15px 16px}
+  /* На мобилке у impact-чипа — только значок и число (без слова), время чтения скрыто */
+  .ev2-imp-word{display:none}
+  .ev2-imp-n-one{display:inline}
+  .ev2-readtime{display:none}
 }

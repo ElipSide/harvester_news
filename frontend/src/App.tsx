@@ -297,7 +297,7 @@ export default function App() {
 
         const [newsData, eventsData] = await Promise.all([
           api.getNews(apiFilters, limit, nextOffset, undefined, signal),
-          api.getEvents(apiFilters, 5, 0, signal),
+          api.getEvents(apiFilters, 5, 0, signal, "date_desc"),
         ]);
         if (seq !== loadSeqRef.current) return;
         setItems(newsData.items);
@@ -666,6 +666,7 @@ export default function App() {
           total={eventsTotal}
           loading={loading || periodLoadingVisual}
           role={filters.role}
+          order="desc"
           onOpenAllEvents={() => navigate("/events")}
           onOpenNews={openNews}
           onTagClick={applyTagFilter}

@@ -701,6 +701,39 @@ async def mark_event_news_batch(rows: list[dict[str, Any]], clustered_news_ids: 
     return {"seen": len(batch), "clustered": clustered, "skipped": skipped}
 
 
+async def prune_stale_inactive_events(days: int | None = None) -> dict[str, Any]:
+    """Удаляет неактивные (ignored_weak) события старше N дней, чтобы не копить мусор.
+
+    Отсчёт ведём от самой свежей даты события в БД (а не от системного времени) —
+    устойчиво и к live-потоку, и к историческому срезу. Окно склейки = 5 дней, так что
+    событие старше порога уже не станет активным. По FK каскадно удаляются его
+    event_sources / event_impacts / event_links / event_graph_rows. Новости остаются
+    в event_news_state, поэтому повторно не обрабатываются.
+    """
+    await ensure_event_schema()
+    n = settings.event_prune_inactive_days if days is None else days
+    events_t = event_table_identifier("events")
+    async with get_conn() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL(
+                    """
+                    DELETE FROM {events}
+                    WHERE status <> 'active'
+                      AND date_to IS NOT NULL
+                      AND date_to < (SELECT MAX(date_to) FROM {events}) - make_interval(days => %(days)s)
+                    """
+                ).format(events=events_t),
+                {"days": int(n)},
+            )
+            deleted = cur.rowcount
+        await conn.commit()
+    if deleted:
+        cache_delete_prefix("events")
+    logger.info("pruned %s stale inactive events (older than %s days)", deleted, n)
+    return {"deleted": int(deleted or 0), "days": int(n)}
+
+
 async def process_events_once() -> dict[str, Any]:
     await ensure_event_schema()
     rows = await fetch_unprocessed_news()
@@ -899,12 +932,13 @@ async def list_events(
     date_from: date | None = None,
     date_to: date | None = None,
     role: str | None = None,
+    sort: str | None = None,
     limit: int,
     offset: int,
 ) -> dict[str, Any]:
     cache_key = (
-        "events_topics_v7_min_sources", settings.event_min_sources, q or "", frozen_list(topic), frozen_list(tag), region or "", product or "",
-        source or "", period or "", str(date_from or ""), str(date_to or ""), role or "", limit, offset,
+        "events_topics_v8_min_sources", settings.event_min_sources, q or "", frozen_list(topic), frozen_list(tag), region or "", product or "",
+        source or "", period or "", str(date_from or ""), str(date_to or ""), role or "", sort or "", limit, offset,
     )
     cached = cache_get(cache_key)
     if cached is not None:
@@ -923,6 +957,13 @@ async def list_events(
         )
         role_score = sql.SQL("CASE ri.impact WHEN 'positive' THEN 3 WHEN 'negative' THEN 3 WHEN 'watch' THEN 2 ELSE 0 END")
 
+    # sort='date_desc' → самые свежие события первыми (для главной).
+    # По умолчанию — ранжирование по значимости (роль/sigma/источники).
+    if sort == "date_desc":
+        order_by = sql.SQL("ORDER BY e.date_to DESC NULLS LAST, e.date_from DESC NULLS LAST, e.id DESC")
+    else:
+        order_by = sql.SQL("ORDER BY role_score DESC, e.sigma DESC, e.sources_count DESC, e.news_count DESC, e.date_to DESC NULLS LAST, e.id DESC")
+
     async def _run_query(local_where: sql.Composed, local_params: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
         total_query = sql.SQL("SELECT COUNT(*) FROM {events} e {where}").format(
             events=event_table_identifier("events"), where=local_where
@@ -938,7 +979,7 @@ async def list_events(
             FROM {events} e
             {role_join}
             {where}
-            ORDER BY role_score DESC, e.sigma DESC, e.sources_count DESC, e.news_count DESC, e.date_to DESC NULLS LAST, e.id DESC
+            {order_by}
             LIMIT %(limit)s OFFSET %(offset)s
             """
         ).format(
@@ -946,6 +987,7 @@ async def list_events(
             role_join=role_join,
             where=local_where,
             role_score=role_score,
+            order_by=order_by,
         )
         local_rows = await fetch_all(query, local_params)
         return local_total, local_rows
@@ -1099,6 +1141,38 @@ async def event_sources(event_id: int, limit: int = 50) -> list[dict[str, Any]]:
         for r in rows
     ]
     return cache_set(cache_key, items, 120)
+
+
+async def event_detail(event_id: int) -> dict[str, Any]:
+    """Источники + impacts по ролям одного события (для шапки страницы чтения)."""
+    cache_key = ("event_detail_v1", int(event_id))
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+    await ensure_event_schema()
+    srcs = await event_sources(event_id)
+    impact_rows = await fetch_all(
+        sql.SQL(
+            """
+            SELECT role, label, impact, summary, action_hint
+            FROM {impacts}
+            WHERE event_id = %(eid)s
+            ORDER BY role
+            """
+        ).format(impacts=event_table_identifier("event_impacts")),
+        {"eid": int(event_id)},
+    )
+    impacts = [
+        {
+            "role": r.get("role"),
+            "label": r.get("label") or _ROLE_LABELS.get(str(r.get("role")), str(r.get("role"))),
+            "impact": r.get("impact") or "watch",
+            "summary": r.get("summary") or "",
+            "action_hint": r.get("action_hint") or "",
+        }
+        for r in impact_rows
+    ]
+    return cache_set(cache_key, {"sources": srcs, "impacts": impacts}, 120)
 
 
 async def events_stats() -> dict[str, Any]:

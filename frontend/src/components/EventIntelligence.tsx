@@ -1040,21 +1040,25 @@ function EventCard({ ev, selectedRole, onOpenNews, onTagClick }: {
 
 // ─── Events block ─────────────────────────────────────────────────────────────
 
-export function EventsBlock({ events, total, loading, role, hasMore, onShowMore, onOpenAllEvents, onOpenNews, onTagClick }: {
+export function EventsBlock({ events, total, loading, role, order = 'asc', hasMore, onShowMore, onOpenAllEvents, onOpenNews, onTagClick }: {
   events: EventItem[];
   total: number;
   loading?: boolean;
   role?: Filters['role'];
+  order?: 'asc' | 'desc';      // 'desc' = самые свежие сверху (для главной)
   hasMore?: boolean;
   onShowMore?: () => void;
   onOpenAllEvents?: () => void;
   onOpenNews: (id: number) => void;
   onTagClick: (tag: string) => void;
 }) {
-  // Always display events oldest → newest (ascending date_from)
+  // По умолчанию старые→новые; order='desc' — самые свежие первыми.
   const sorted = useMemo(
-    () => [...events].sort((a, b) => (a.date_from ?? '').localeCompare(b.date_from ?? '')),
-    [events],
+    () => {
+      const asc = [...events].sort((a, b) => (a.date_from ?? '').localeCompare(b.date_from ?? ''));
+      return order === 'desc' ? asc.reverse() : asc;
+    },
+    [events, order],
   );
 
   if (!events.length) return null;
@@ -1343,7 +1347,7 @@ export function EventIntelligence({
                 ))}
               </div>
               <div className="eg-scale-tabs">
-                {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
+                {(['week', 'month'] as Scale[]).map(s => (
                   <button key={s} className={`eg-scale-tab${state.scale === s ? ' on' : ''}`}
                     onClick={() => dispatch({ type: 'SET_SCALE', scale: s })}>
                     {SCALE_LABELS[s]}
@@ -1357,6 +1361,7 @@ export function EventIntelligence({
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>
               </svg>
+              <span className="eg-filters-label">Фильтры</span>
               {(filterCount ?? 0) > 0 && <span className="eg-filters-c">{filterCount}</span>}
             </button>
           )}

@@ -89,6 +89,7 @@ async def home_initial_payload(
         date_from=None,
         date_to=None,
         role=role,
+        sort="date_desc",
         limit=5,
         offset=0,
     )
@@ -160,6 +161,7 @@ async def home_payload(
         date_from=date_from,
         date_to=date_to,
         role=role,
+        sort="date_desc",
         limit=events_limit,
         offset=0,
     )
@@ -265,6 +267,7 @@ async def home_fast_week_payload(
         date_from=None,
         date_to=None,
         role=role,
+        sort="date_desc",
         limit=5,
         offset=0,
     )

@@ -101,6 +101,12 @@ class Settings:
     event_worker_lookback_days: int = int(os.getenv("EVENT_WORKER_LOOKBACK_DAYS", "365"))
     event_worker_process_all: bool = os.getenv("EVENT_WORKER_PROCESS_ALL", "false").lower() in {"1", "true", "yes", "on"}
 
+    # Очистка БД: удаляем неактивные (ignored_weak) события старше N дней относительно
+    # самой свежей даты события. Они уже не доберут источников (окно склейки 5 дней),
+    # поэтому копить их в БД незачем. Новости остаются помеченными в event_news_state.
+    event_prune_inactive_enabled: bool = os.getenv("EVENT_PRUNE_INACTIVE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    event_prune_inactive_days: int = int(os.getenv("EVENT_PRUNE_INACTIVE_DAYS", "5"))
+
     # Pixabay API для фоновых изображений карточек новостей.
     # Получить бесплатно: https://pixabay.com/api/
     # Если пустой — карточки генерируются с зелёным градиентом (fallback).

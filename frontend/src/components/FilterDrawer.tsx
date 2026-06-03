@@ -1,5 +1,8 @@
-import { Check, ExternalLink, X } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import type { FacetItem, Filters } from '../types';
+
+// Федеральные округа — локальный фокус ленты/графа по региону.
+const DISTRICTS = ['ЦФО', 'ЮФО', 'СКФО', 'ПФО', 'УФО', 'СФО', 'ДФО', 'СЗФО'];
 
 type RoleKey = NonNullable<Filters['role']>;
 
@@ -122,14 +125,6 @@ function matchingTopics(topics: FacetItem[], keywords: string[]): string[] {
   return result.slice(0, 3);
 }
 
-function roleByKey(key: Filters['role']): RolePreset {
-  return rolePresets.find((role) => role.key === key) || rolePresets[0];
-}
-
-function roleInitial(role: RolePreset) {
-  return role.title.slice(0, 1).toUpperCase();
-}
-
 export function FilterDrawer({
   open,
   filters,
@@ -152,8 +147,6 @@ export function FilterDrawer({
   onReset: () => void;
   resultCount: number;
 }) {
-  const activeRole = roleByKey(filters.role);
-
   const applyRole = (role: RolePreset) => {
     const roleTopics = matchingTopics(topics, role.topicKeywords);
     const product = firstMatchingFacet(products, role.productKeywords);
@@ -184,7 +177,7 @@ export function FilterDrawer({
         <div className="drawer-body">
           <div className="drawer-section">
             <div className="drawer-section-k">профиль · подобрать новости под роль</div>
-            <p className="drawer-hint">Пресет меняет роль, темы, продукт, регион и сортировку, но не ограничивает ленту по датам.</p>
+            <p className="drawer-hint">Пресет меняет акцент: поднимает темы, продукты и регионы роли в графе и ленте, меняет сортировку. Ничего не скрывает — все события остаются.</p>
             <div className="seg-grid">
               {rolePresets.map((role) => {
                 const active = filters.role === role.key;
@@ -200,40 +193,22 @@ export function FilterDrawer({
                 );
               })}
             </div>
-
-            <a href="#" className="dr-max" onClick={(event) => event.preventDefault()}>
-              <span className="dr-max-ic">MAX</span>
-              <span className="dr-max-tx">
-                <span className="dr-max-t">{activeRole.maxName}</span>
-                <span className="dr-max-m">{activeRole.maxMeta}</span>
-              </span>
-              <span className="dr-max-go"><ExternalLink /></span>
-            </a>
           </div>
 
           <div className="drawer-section">
-            <div className="drawer-section-k">вид и сортировка</div>
-            <button className={`dr-tog ${filters.hasPhoto === true ? 'on' : ''}`} onClick={() => onChange({ hasPhoto: filters.hasPhoto === true ? null : true })}>
-              <span className="dr-tog-sw" />
-              <span className="dr-tog-tx">
-                <span className="dr-tog-t">Только с фото</span>
-                <span className="dr-tog-m">новости с заполненным link_photo</span>
-              </span>
-            </button>
-            <button className={`dr-tog ${filters.hasPhoto === false ? 'on' : ''}`} onClick={() => onChange({ hasPhoto: filters.hasPhoto === false ? null : false })}>
-              <span className="dr-tog-sw" />
-              <span className="dr-tog-tx">
-                <span className="dr-tog-t">Только без фото</span>
-                <span className="dr-tog-m">для проверки записей без link_photo</span>
-              </span>
-            </button>
-            <button className={`dr-tog ${filters.sort === 'views_desc' ? 'on' : ''}`} onClick={() => onChange({ sort: filters.sort === 'views_desc' ? 'date_desc' : 'views_desc' })}>
-              <span className="dr-tog-sw" />
-              <span className="dr-tog-tx">
-                <span className="dr-tog-t">Сначала читаемые</span>
-                <span className="dr-tog-m">сортировка по полю views</span>
-              </span>
-            </button>
+            <div className="drawer-section-k">федеральный округ</div>
+            <p className="drawer-hint">Локальный фокус: поднимает события округа и его специфику (что там выращивают).</p>
+            <div className="dr-chips">
+              {DISTRICTS.map((d) => (
+                <button
+                  key={d}
+                  className={`dr-chip ${filters.region === d ? 'on' : ''}`}
+                  onClick={() => onChange({ region: filters.region === d ? null : d })}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <div className="drawer-foot">
