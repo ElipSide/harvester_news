@@ -235,25 +235,10 @@ export function StoryTimeline({ graph, focusEventId, onOpenNews }: { graph: Full
     return `<div class="stl-tip-d"><span class="stl-tip-date">${(() => { const p = dpart(node.date); return `${p.d}.${String(p.m + 1).padStart(2, '0')}`; })()}</span><span class="stl-tip-sg">σ ${node.sg}</span><span class="stl-tip-conn">${conn}${vis}</span></div><div class="stl-tip-ti">${cleanSummary(node.ti)}</div>`;
   };
 
-  const threads = (fn.s || []).filter((sid) => STORY[sid]);
   const A = active;
 
   return (
     <section className="stl-wrap">
-      {/* kicker: сюжеты события + выпадашка всех сюжетов */}
-      <div className="stl-kicker">
-        <span className="stl-klabel">сюжет</span>
-        <span className="stl-kthreads">
-          {threads.length ? threads.map((sid, i) => (
-            <span key={sid}>
-              {i > 0 && <span className="stl-ksep">·</span>}
-              <button className={`stl-kth${sid === active ? ' on' : ''}`} onClick={() => setActive(sid)}>{STORY[sid].name}</button>
-            </span>
-          )) : <span className="stl-kmut">вне сюжета</span>}
-        </span>
-        <button className="stl-kall" onClick={() => setKpop((v) => !v)} aria-label="все сюжеты">▾</button>
-      </div>
-
       {/* сцена графа */}
       <div className="stl-stage" ref={stageRef} style={{ height: H }} onPointerLeave={() => setTip(null)}>
         <svg className="stl-svg" viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none">
