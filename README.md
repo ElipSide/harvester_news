@@ -1,9 +1,9 @@
 # Harvester News — production + semantic RAG события без платных LLM
 
-Проект настроен для публикации по адресу:
+Проект публикуется под префиксом `/test_news/` за внешним nginx, например:
 
 ```text
-https://csort-news.ru/test_news/
+https://your-domain.example/test_news/
 ```
 
 В Docker запускаются три сервиса:
@@ -91,7 +91,7 @@ nano .env
 Минимум:
 
 ```env
-PG_CONNINFO="dbname=serp_robot user=sammy password=пароль host=v2210764.hosted-by-vdsina.ru port=5432"
+PG_CONNINFO="dbname=DBNAME user=USER password=PASSWORD host=DB_HOST port=5432"
 NEWS_TABLE=news_list
 EVENTS_SCHEMA=harvester_news
 ```
@@ -236,7 +236,7 @@ Backend доступен только внутри docker-сети и напря
 
 ## Nginx на сервере
 
-Добавьте в server block домена `csort-news.ru`:
+Добавьте в server block вашего домена:
 
 ```nginx
 location = /test_news {
@@ -486,8 +486,8 @@ docker-compose up -d events-worker
 Проверка:
 
 ```bash
-curl https://csort-news.ru/test_news/api/v1/news/events/stats
-curl "https://csort-news.ru/test_news/api/v1/news/events?limit=5"
+curl https://your-domain.example/test_news/api/v1/news/events/stats
+curl "https://your-domain.example/test_news/api/v1/news/events?limit=5"
 ```
 
 

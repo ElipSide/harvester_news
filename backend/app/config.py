@@ -36,11 +36,12 @@ class Settings:
     app_name: str = os.getenv("APP_NAME", "Harvester News API")
     api_prefix: str = os.getenv("API_PREFIX", "/api/v1")
 
-    # Такой же формат, как в вашем примере:
-    # dbname=serp_robot user=sammy password=... host=v2210764.hosted-by-vdsina.ru port=5432
+    # Строка подключения к PostgreSQL. Реальное значение задаётся через переменную
+    # окружения PG_CONNINFO (см. .env / .env.example). Дефолт — только плейсхолдер.
+    # Формат: dbname=DBNAME user=USER password=PASSWORD host=DB_HOST port=5432
     pg_conninfo: str = os.getenv(
         "PG_CONNINFO",
-        "dbname=serp_robot user=sammy password=changeme host=v2210764.hosted-by-vdsina.ru port=5432",
+        "dbname=DBNAME user=USER password=PASSWORD host=DB_HOST port=5432",
     )
 
     # Если NEWS_SCHEMA пустой — backend сам ищет схему, где лежит news_list.
