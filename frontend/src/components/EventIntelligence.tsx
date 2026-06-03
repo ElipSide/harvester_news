@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { Activity, AlertTriangle, ChevronDown, TrendingUp } from 'lucide-react';
 import type { EventItem, EventGraphItem, Filters } from '../types';
 import { cleanSummary } from '../utils/text';
 
@@ -189,9 +190,12 @@ const INI_OVR: Record<string, string> = {
   'Жмых/Шрот':'ЖШ','Мука/Крупа':'МК',
 };
 
-const IMPACT_LABELS: Record<string, string> = {
-  positive: 'ПОЗИТИВ', negative: 'РИСК', neutral: 'НЕЙТРАЛЬНО', watch: 'СЛЕДИТЬ',
-};
+// Категории impact-чипов (как на странице чтения): риск/позитив/следить.
+const IMP_CATS = [
+  { key: 'negative', word: 'риск', cls: 'neg' },
+  { key: 'positive', word: 'позитив', cls: 'pos' },
+  { key: 'watch', word: 'следить', cls: 'watch' },
+] as const;
 
 // Deterministic fallback palette for nodes not listed in PAL.
 // Muted tones that fit the dark UI; consistent per name via djb2 hash.
@@ -908,7 +912,7 @@ function MiniTimeline({
 
 // ─── Event card ───────────────────────────────────────────────────────────────
 
-function EventCard({ ev, selectedRole, onOpenNews, onTagClick }: {
+function EventCard({ ev, onOpenNews, onTagClick }: {
   ev: EventItem;
   selectedRole?: Filters['role'];
   onOpenNews: (id: number) => void;
@@ -918,26 +922,21 @@ function EventCard({ ev, selectedRole, onOpenNews, onTagClick }: {
   const dateTo   = ev.date_to && ev.date_to !== ev.date_from ? formatEvDate(ev.date_to) : null;
   const dateRange = dateTo ? `${dateFrom} — ${dateTo}` : dateFrom;
   const sigmaClass = ev.sigma >= 85 ? 'hi' : ev.sigma >= 70 ? 'md' : 'lo';
-  // Какой impact-чип раскрыт (для мобильного аккордеона; на десктопе работает hover-тултип)
+  // Какая категория impact-чипа раскрыта (как на странице чтения новости).
   const [openImpact, setOpenImpact] = useState<string | null>(null);
-  const [showAllImpacts, setShowAllImpacts] = useState(false);
+  const impPopRef = useRef<HTMLDivElement | null>(null);
   const openNews = () => { if (ev.main_news_id) onOpenNews(ev.main_news_id); };
 
-  // Рекомендации: нейтральные роли скрыты. Порядок — сначала риск/позитив, потом «следить».
-  // Если юзер выбрал роль в фильтрах — она показывается первой (и одна по умолчанию);
-  // иначе показываем первые 3. Остальное — под кнопкой «ещё».
-  const impactRank = (imp: EventItem['impacts'][number]) => (imp.impact === 'watch' ? 1 : 0);
-  const visibleImpacts = (ev.impacts || [])
-    .filter((imp) => imp.impact !== 'neutral')
-    .slice()
-    .sort((a, b) => impactRank(a) - impactRank(b)); // stable: риск/позитив сохраняют исходный порядок
-  const selectedImpact = selectedRole ? visibleImpacts.find((imp) => imp.role === selectedRole) : undefined;
-  const orderedImpacts = selectedImpact
-    ? [selectedImpact, ...visibleImpacts.filter((imp) => imp !== selectedImpact)]
-    : visibleImpacts;
-  const baseCount = selectedImpact ? 1 : 3;
-  const shownImpacts = showAllImpacts ? orderedImpacts : orderedImpacts.slice(0, baseCount);
-  const hiddenImpactCount = orderedImpacts.length - shownImpacts.length;
+  // При раскрытии выпадашки прокручиваем её к центру экрана, чтобы весь список ролей был виден.
+  useEffect(() => {
+    if (openImpact && impPopRef.current) {
+      impPopRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, [openImpact]);
+
+  // Рекомендации сгруппированы по категориям (риск/позитив/следить), нейтральные скрыты.
+  const impByCat = (cat: string) => (ev.impacts || []).filter((i) => i.impact === cat);
+  const hasImpacts = (ev.impacts || []).some((i) => i.impact !== 'neutral');
 
   return (
     <div
@@ -980,43 +979,44 @@ function EventCard({ ev, selectedRole, onOpenNews, onTagClick }: {
           </div>
         )}
 
-        {/* Impact по ролям — компактный список: цветная полоска статуса + роль + подпись. Тап раскрывает детали.
-            Нейтральные роли скрыты. Выбранная в фильтрах роль — первой; остальное под кнопкой «ещё». */}
-        {shownImpacts.length > 0 && (
-          <div className="ev-imp-list" onClick={(e) => e.stopPropagation()}>
-            {shownImpacts.map(imp => {
-              const hasDetail = Boolean(imp.summary || imp.action_hint);
-              const open = openImpact === imp.role;
+        {/* Impact-чипы по категориям (риск/позитив/следить) — как на странице чтения новости.
+            Клик по чипу раскрывает выпадашку с ролями. Нейтральные скрыты. */}
+        {hasImpacts && (
+          <div className="ev-card-imps" onClick={(e) => e.stopPropagation()}>
+            {IMP_CATS.map((cat) => {
+              const roles = impByCat(cat.key);
+              if (!roles.length) return null;
+              const open = openImpact === cat.key;
               return (
-                <div key={imp.role} className={`ev-imp-item ev-imp-item-${imp.impact}${hasDetail ? ' has-detail' : ''}${open ? ' open' : ''}`}>
+                <span key={cat.key} className="ev2-imp-wrap">
                   <button
                     type="button"
-                    className="ev-imp-line"
-                    onClick={(e) => { e.stopPropagation(); if (hasDetail) setOpenImpact(open ? null : imp.role); }}
+                    className={`ev2-imp-chip ev2-imp-${cat.cls}${open ? ' open' : ''}`}
+                    onClick={(e) => { e.stopPropagation(); setOpenImpact(open ? null : cat.key); }}
+                    aria-expanded={open}
                   >
-                    <span className="ev-imp-role">{imp.label}</span>
-                    <span className={`ev-imp-stat ev-imp-stat-${imp.impact}`}>
-                      {IMPACT_LABELS[imp.impact] ?? imp.impact}
-                    </span>
+                    {cat.cls === 'neg' && <AlertTriangle />}
+                    {cat.cls === 'pos' && <TrendingUp />}
+                    {cat.cls === 'watch' && <Activity />}
+                    <span className="ev2-imp-word">{cat.word}</span>
+                    <b className={`ev2-imp-n${roles.length === 1 ? ' ev2-imp-n-one' : ''}`}>{roles.length}</b>
+                    <ChevronDown className="ev2-imp-cv" />
                   </button>
-                  {hasDetail && open && (
-                    <div className="ev-imp-detail">
-                      {imp.summary && <span className="ev-imp-tip-sm">{cleanSummary(imp.summary)}</span>}
-                      {imp.action_hint && <span className="ev-imp-tip-hint">{cleanSummary(imp.action_hint)}</span>}
+                  {open && (
+                    <div className="ev2-imp-pop" ref={impPopRef}>
+                      <div className="ev2-imp-pop-hd">{cat.word} · {roles.map((r) => r.label).join(', ')}</div>
+                      {roles.map((r) => (
+                        <div key={r.role} className="ev2-imp-pop-row">
+                          <span className="ev2-imp-pop-role">{r.label}</span>
+                          {r.summary && <span className="ev2-imp-pop-sm">{cleanSummary(r.summary)}</span>}
+                          {r.action_hint && <span className="ev2-imp-pop-hint">{cleanSummary(r.action_hint)}</span>}
+                        </div>
+                      ))}
                     </div>
                   )}
-                </div>
+                </span>
               );
             })}
-            {(hiddenImpactCount > 0 || showAllImpacts) && orderedImpacts.length > baseCount && (
-              <button
-                type="button"
-                className="ev-imp-more"
-                onClick={(e) => { e.stopPropagation(); setShowAllImpacts((v) => !v); }}
-              >
-                {showAllImpacts ? 'свернуть' : `ещё ${hiddenImpactCount}`}
-              </button>
-            )}
           </div>
         )}
 

@@ -545,6 +545,10 @@ export default function App() {
             onTagClick={applyTagFilter}
             selectedPeriodLabel={selectedPeriodLabel}
             isPeriodSelected={isPeriodSelected}
+            onSelectRange={handleTimelineRangeSelect}
+            selectedDateFrom={filters.dateFrom}
+            selectedDateTo={filters.dateTo}
+            onClearRange={clearTimelineRange}
             fullPage
             hasMore={eventsPageHasMore}
             onShowMore={() => loadEventsPage(eventsPageOffset + 30, true)}

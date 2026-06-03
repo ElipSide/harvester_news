@@ -885,6 +885,8 @@ button,input{font:inherit;color:inherit;background:none;border:none;outline:none
 
 /* Events block */
 .ev-block{margin-top:24px;border-top:2px solid var(--line);padding-top:20px}
+/* Блок новостей отделяем от блока событий (тот же разделитель-секция) */
+.main{margin-top:24px;border-top:2px solid var(--line);padding-top:20px}
 .ev-block-hd{display:flex;align-items:center;gap:10px;margin-bottom:18px}
 .ev-block-k{font-family:var(--mono);font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
 .ev-block-cnt{font-size:18px;font-weight:700;color:var(--ink);background:var(--green-tint);border:1px solid var(--green-line);padding:2px 10px;border-radius:8px;color:var(--green-deep)}
@@ -1202,10 +1204,12 @@ svg.eg-graph{display:block;width:100%;height:auto}
 }
 
 @media (max-width: 600px){
-  /* — Поле поиска показываем только по кнопке «Поиск» — */
-  .single-tags-panel .filter-search{display:none}
+  /* — Поле поиска показываем только по кнопке «Поиск».
+       Пока поиск закрыт — панель фильтров пустая и не должна занимать места. — */
+  .single-tags-panel:not(.search-open) .compact-filter-bar{display:none}
+  .single-tags-panel.search-open .compact-filter-bar{display:flex;gap:10px}
   .single-tags-panel.search-open .filter-search{display:flex}
-  .compact-filter-bar{gap:10px}
+  .page-hd{margin-bottom:0}
 
   /* — Убираем лишние подписи/описания (заголовки блоков оставляем) — */
   .events-head p,.events-page-top p{display:none}
@@ -1310,6 +1314,8 @@ svg.eg-graph{display:block;width:100%;height:auto}
 .ev2-meta-r{margin-left:auto;display:inline-flex;align-items:center;gap:9px}
 .ev2-views{display:inline-flex;align-items:center;gap:5px}
 .ev2-views svg{width:13px;height:13px;color:var(--ink-3)}
+/* Контейнер impact-чипов в карточке события (тот же стиль, что на странице чтения) */
+.ev-card-imps{display:flex;flex-wrap:wrap;align-items:center;gap:14px;position:relative;margin-top:2px}
 /* impact-чипы (риск/позитив/следить) — клик открывает выпадашку */
 .ev2-imp-wrap{position:relative;display:inline-flex}
 .ev2-imp-chip{display:inline-flex;align-items:center;gap:4px;background:none;border:none;padding:1px 0;margin:0;font:inherit;font-size:12px;font-weight:600;cursor:pointer;line-height:1;transition:opacity var(--t-fast)}
@@ -1386,8 +1392,9 @@ svg.eg-graph{display:block;width:100%;height:auto}
   .ev2-body .rich-text{font-size:13.5px;line-height:1.5}
   .detail-fulltext .detail-body{padding:16px 15px 4px}
   .detail-fulltext .source-link{margin:0 15px 16px}
-  /* На мобилке у impact-чипа — только значок и число (без слова), время чтения скрыто */
-  .ev2-imp-word{display:none}
-  .ev2-imp-n-one{display:inline}
+  /* На мобилке у impact-чипа В ШАПКЕ ЧТЕНИЯ — только значок и число (без слова).
+     В карточке события (.ev-card-imps) слово показываем всегда — там есть место. */
+  .ev2-meta .ev2-imp-word{display:none}
+  .ev2-meta .ev2-imp-n-one{display:inline}
   .ev2-readtime{display:none}
 }
