@@ -1368,6 +1368,11 @@ svg.eg-graph{display:block;width:100%;height:auto}
 .ev2-body .rich-text{font-size:15px;line-height:1.62;color:var(--ink-2)}
 .ev2-body .rich-text p + p,.ev2-body .rich-text ul{margin-top:12px}
 .ev2-body .rich-text .rich-list{padding-left:18px;display:flex;flex-direction:column;gap:5px}
+/* Скелетон тела статьи, пока грузится граф события */
+.ev2-body-skeleton{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+.ev2-body-skeleton .sk-line{height:13px;border-radius:6px;background:linear-gradient(90deg,var(--line) 25%,rgba(0,0,0,0.04) 37%,var(--line) 63%);background-size:400% 100%;animation:sk-shimmer 1.3s ease-in-out infinite}
+.ev2-body-skeleton .sk-short{width:62%}
+@keyframes sk-shimmer{0%{background-position:100% 0}100%{background-position:0 0}}
 .ev2-source{display:inline-flex;align-items:center;gap:6px;margin:10px 0 2px;font-size:13px;font-weight:600;color:var(--green-deep);text-decoration:none}
 .ev2-source:hover{color:var(--green)}
 .ev2-source svg{width:14px;height:14px}

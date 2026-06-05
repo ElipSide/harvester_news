@@ -14,7 +14,7 @@ from psycopg import sql
 from app.services.event_tables import ensure_event_schema, write_job_state
 from app.services.topic_index import reset_topic_index, sync_topic_index_once, topic_index_stats, rebuild_topic_daily_stats
 from app.db.db_ext import get_conn
-from app.services_events import process_events_once, prune_stale_inactive_events
+from app.services_events import process_events_once, prune_stale_inactive_events, rewrite_articles_for_active_events
 from app.services.event_graph import rebuild_event_graph
 
 logging.basicConfig(
@@ -87,13 +87,18 @@ async def _run_once() -> dict[str, Any]:
     return combined
 
 
-async def worker_loop(once: bool = False, reset: bool = False, drain: bool = False, sync_topics_only: bool = False, reset_topics: bool = False, sync_topic_stats_only: bool = False, rebuild_stories_only: bool = False, prune_only: bool = False) -> None:
+async def worker_loop(once: bool = False, reset: bool = False, drain: bool = False, sync_topics_only: bool = False, reset_topics: bool = False, sync_topic_stats_only: bool = False, rebuild_stories_only: bool = False, prune_only: bool = False, rewrite_articles_only: bool = False, rewrite_all: bool = False, rewrite_limit: int | None = None) -> None:
     await open_pool()
     try:
         await ensure_event_schema()
         if reset:
             logger.warning("reset requested: truncating event tables before processing")
             await reset_event_tables()
+
+        if rewrite_articles_only:
+            logger.info("rewriting active events into articles via RAGFlow (all=%s limit=%s)", rewrite_all, rewrite_limit)
+            logger.info("rewrite result: %s", await rewrite_articles_for_active_events(limit=rewrite_limit, only_missing=not rewrite_all))
+            return
 
         if prune_only:
             logger.info("pruning stale inactive events: %s", await prune_stale_inactive_events())
@@ -179,6 +184,9 @@ def main() -> None:
     parser.add_argument("--sync-topic-stats", action="store_true", help="Only rebuild pre-aggregated daily topic stats and exit")
     parser.add_argument("--rebuild-stories", action="store_true", help="Only rebuild the event story graph (links + stories) on current events and exit")
     parser.add_argument("--prune", action="store_true", help="Only delete stale inactive (ignored_weak) events older than the configured window and exit")
+    parser.add_argument("--rewrite-articles", action="store_true", help="Only rewrite existing active events into RAGFlow articles and exit (requires EVENT_RAGFLOW_ENABLED + RAGFLOW_* env)")
+    parser.add_argument("--rewrite-all", action="store_true", help="With --rewrite-articles: rewrite ALL active events, not only those missing an article")
+    parser.add_argument("--rewrite-limit", type=int, default=None, help="With --rewrite-articles: cap the number of events to rewrite")
     args = parser.parse_args()
 
     loop = asyncio.new_event_loop()
@@ -197,6 +205,9 @@ def main() -> None:
         sync_topic_stats_only=args.sync_topic_stats,
         rebuild_stories_only=args.rebuild_stories,
         prune_only=args.prune,
+        rewrite_articles_only=args.rewrite_articles,
+        rewrite_all=args.rewrite_all,
+        rewrite_limit=args.rewrite_limit,
     ))
 
 

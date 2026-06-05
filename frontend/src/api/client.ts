@@ -36,6 +36,53 @@ async function request<T>(path: string, params?: URLSearchParams, signal?: Abort
   return response.json() as Promise<T>;
 }
 
+async function postJson<T>(path: string, payload: unknown, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`${response.status} ${response.statusText}: ${details}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+export type LabEvent = { id: number; title: string; date_to: string | null; news_count: number; sources: number };
+export type LabDefaults = { system_prompt: string; plain_system: string; max_source_chars: number; max_sources: number; model: string; active: boolean };
+export type LabPreview = { ok: boolean; title?: string; article?: string; words?: number; raw?: string; usage?: unknown; model?: string; sources_used?: number; attempts?: number; used_fallback?: boolean; error?: string };
+export type LabPreviewStart = { ok: boolean; job_id?: string; status?: string; error?: string };
+export type LabPreviewResult = { status: 'running' | 'done' | 'error' | 'unknown'; result?: LabPreview };
+export type LabSource = { index: number; id: number | null; source: string; date: string; title: string; tags: string[]; text: string; link: string; full_chars: number; shown_chars: number; truncated: boolean };
+export type LabSources = { event_id: number; sources: LabSource[] };
+
+export const labApi = {
+  defaults: () => request<LabDefaults>('/news/events/lab/defaults'),
+  events: (q?: string, limit = 100) => {
+    const p = new URLSearchParams();
+    if (q && q.trim()) p.set('q', q.trim());
+    p.set('limit', String(limit));
+    return request<{ items: LabEvent[] }>('/news/events/lab/list', p);
+  },
+  preview: (payload: { event_id: number; system_prompt?: string; user_prompt?: string; max_source_chars?: number }, signal?: AbortSignal) =>
+    postJson<LabPreview>('/news/events/lab/preview', payload, signal),
+  // Async: запуск в фоне (мгновенно отдаёт job_id) + поллинг результата — чтобы не
+  // упираться в proxy_read_timeout nginx при долгой (50–360с) генерации RAGFlow.
+  previewStart: (payload: { event_id: number; system_prompt?: string; user_prompt?: string; max_source_chars?: number }, signal?: AbortSignal) =>
+    postJson<LabPreviewStart>('/news/events/lab/preview/start', payload, signal),
+  previewResult: (jobId: string, signal?: AbortSignal) => {
+    const p = new URLSearchParams({ job_id: jobId });
+    return request<LabPreviewResult>('/news/events/lab/preview/result', p, signal);
+  },
+  sources: (eventId: number, maxSourceChars?: number, signal?: AbortSignal) => {
+    const p = new URLSearchParams({ event_id: String(eventId) });
+    if (maxSourceChars) p.set('max_source_chars', String(maxSourceChars));
+    return request<LabSources>('/news/events/lab/sources', p, signal);
+  },
+};
+
 export function buildNewsParams(
   filters: Filters,
   limit = 20,
@@ -142,7 +189,7 @@ export const api = {
     return request<FullGraphResponse>('/news/events/full_graph', params, signal);
   },
   getEventDetail(eventId: number, signal?: AbortSignal) {
-    return request<{ sources: EventSource[]; impacts: EventRoleImpact[] }>(`/news/events/${eventId}/detail`, undefined, signal);
+    return request<{ title?: string; article?: string; sources: EventSource[]; impacts: EventRoleImpact[] }>(`/news/events/${eventId}/detail`, undefined, signal);
   },
   getFeatured() {
     const params = new URLSearchParams({ limit: '3' });

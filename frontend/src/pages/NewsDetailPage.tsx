@@ -86,6 +86,8 @@ export function NewsDetailPage({
   // Источники + impacts события (для шапки): один запрос на загрузке страницы.
   const [sources, setSources] = useState<EventSource[] | null>(null);
   const [impacts, setImpacts] = useState<EventRoleImpact[]>([]);
+  const [eventArticle, setEventArticle] = useState<string>('');  // статья события (RAGFlow)
+  const [eventTitle, setEventTitle] = useState<string>('');      // заголовок события (RAGFlow)
   const [srcOpen, setSrcOpen] = useState(false);          // выпадашка источников
   const [impOpen, setImpOpen] = useState<string | null>(null);  // открытая категория impact
   const [tagsExpanded, setTagsExpanded] = useState(false);      // раскрыты ли все темы
@@ -115,12 +117,14 @@ export function NewsDetailPage({
   useEffect(() => {
     setSources(null);
     setImpacts([]);
+    setEventArticle('');
+    setEventTitle('');
     setSrcOpen(false);
     setImpOpen(null);
     if (focusEventId == null) return;
     let cancelled = false;
     api.getEventDetail(focusEventId)
-      .then((d) => { if (!cancelled) { setSources(d.sources); setImpacts(d.impacts); } })
+      .then((d) => { if (!cancelled) { setSources(d.sources); setImpacts(d.impacts); setEventArticle((d.article || '').trim()); setEventTitle((d.title || '').trim()); } })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [focusEventId]);
@@ -156,8 +160,16 @@ export function NewsDetailPage({
     ? graph.nodes.find((n) => n.id === graph.focus_event_id) || null
     : null;
   const dek = cleanSummary(focusEvent?.dek || item.summary || item.text || '');
-  const bodyText = withoutLeadingTitle(item.text, item.title);
-  const readMin = readMinutes(item.text || item.summary);
+  // Статья/заголовок события: сначала из графа (приходят раньше), затем из event_detail.
+  const focusArticle = (graph?.focus_article || eventArticle || '').trim();
+  const focusTitleStr = (graph?.focus_title || eventTitle || '').trim();
+  // Тело страницы — статья события (RAGFlow), если она есть; иначе текст исходной новости.
+  const bodyText = focusArticle || withoutLeadingTitle(item.text, item.title);
+  const pageTitle = focusTitleStr || item.title;
+  const readMin = readMinutes(focusArticle || item.text || item.summary);
+  // Пока граф не загрузился, не показываем короткий текст новости — даём скелетон,
+  // чтобы не было «моргания» (короткий текст → полная статья).
+  const bodyLoading = graph === null;
 
   return (
     <main className="page detail-page event-page">
@@ -165,7 +177,7 @@ export function NewsDetailPage({
       <article className="ev-card2">
         <div className="ev2-head">
           <button className="ev2-back" onClick={onBack} aria-label="Назад к ленте" title="Назад к ленте"><ChevronLeft /></button>
-          <h1>{item.title}</h1>
+          <h1>{pageTitle}</h1>
         </div>
 
         <div className="ev2-meta">
@@ -276,10 +288,18 @@ export function NewsDetailPage({
           </div>
         )}
 
-        {/* Полный текст новости (не обрезается). Если текста нет — короткая сводка. */}
-        {bodyText
-          ? <div className="ev2-dek ev2-body"><RichText text={bodyText} fallback={item.summary} /></div>
-          : (dek && <div className="ev2-dek">{dek}</div>)}
+        {/* Тело: статья события. Пока грузится граф — скелетон (без мелькания короткого текста). */}
+        {bodyLoading
+          ? (
+            <div className="ev2-body ev2-body-skeleton" aria-hidden="true">
+              <span className="sk-line" /><span className="sk-line" /><span className="sk-line" />
+              <span className="sk-line sk-short" /><span className="sk-line" /><span className="sk-line" />
+              <span className="sk-line sk-short" />
+            </div>
+          )
+          : bodyText
+            ? <div className="ev2-dek ev2-body"><RichText text={bodyText} fallback={item.summary} /></div>
+            : (dek && <div className="ev2-dek">{dek}</div>)}
 
         {hasTags && (() => {
           const allTags = [

@@ -568,6 +568,7 @@ async def upsert_event_from_group(event_key: str, rows: list[dict[str, Any]], an
                         views = agg.views,
                         date_from = agg.date_from,
                         date_to = agg.date_to,
+                        news_ids = agg.news_ids,
                         updated_at = CURRENT_TIMESTAMP
                     FROM (
                         SELECT event_id,
@@ -575,7 +576,8 @@ async def upsert_event_from_group(event_key: str, rows: list[dict[str, Any]], an
                                COUNT(DISTINCT COALESCE(NULLIF(source, ''), NULLIF(customer, ''), news_id::text))::int AS sources_count,
                                COALESCE(SUM(views), 0)::int AS views,
                                MIN(news_date) AS date_from,
-                               MAX(news_date) AS date_to
+                               MAX(news_date) AS date_to,
+                               ARRAY_AGG(news_id ORDER BY news_date DESC NULLS LAST, news_id DESC) AS news_ids
                         FROM {sources}
                         WHERE event_id = %(event_id)s
                         GROUP BY event_id
@@ -734,6 +736,126 @@ async def prune_stale_inactive_events(days: int | None = None) -> dict[str, Any]
     return {"deleted": int(deleted or 0), "days": int(n)}
 
 
+async def rewrite_articles_for_active_events(
+    limit: int | None = None, only_missing: bool = True
+) -> dict[str, Any]:
+    """Бэкфилл: переписывает уже существующие активные события в статьи через RAGFlow.
+
+    Для каждого активного события берёт его исходные новости из news_list по
+    events.news_ids, прогоняет через RAGFlow-writer и обновляет title/summary.
+    only_missing=True — только события, у которых статья ещё не сгенерирована
+    (raw_llm->>'ragflow_used' не true).
+    """
+    await ensure_event_schema()
+    if not settings.ragflow_active:
+        return {"status": "skipped", "reason": "ragflow_inactive", "updated": 0}
+
+    from app.services.ragflow_writer import rewrite_event_article
+
+    events_t = event_table_identifier("events")
+    news_table = await news_table_identifier()
+
+    where_missing = sql.SQL(" AND COALESCE(raw_llm->>'ragflow_used', '') <> 'true'") if only_missing else sql.SQL("")
+    limit_sql = sql.SQL(" LIMIT %(limit)s") if limit else sql.SQL("")
+    params: dict[str, Any] = {}
+    if limit:
+        params["limit"] = int(limit)
+
+    targets = await fetch_all(
+        sql.SQL(
+            """
+            SELECT id, news_ids, title, summary, raw_llm, topics, tags, products, regions
+            FROM {events}
+            WHERE status = 'active'
+              AND news_ids IS NOT NULL
+              AND array_length(news_ids, 1) > 0
+              {where_missing}
+            ORDER BY date_to DESC NULLS LAST, id DESC
+            {limit_sql}
+            """
+        ).format(events=events_t, where_missing=where_missing, limit_sql=limit_sql),
+        params,
+    )
+
+    updated = 0
+    failed = 0
+    logger.info("rewrite_articles: к обработке %s событий", len(targets))
+    for idx, ev in enumerate(targets, start=1):
+        # Каждое событие изолировано: разовый обрыв БД/RAGFlow пропускает его и НЕ
+        # валит весь прогон (внешняя БД иногда рвёт SSL-соединение). Пропущенные
+        # остаются без статьи и подхватятся повторным запуском.
+        try:
+            news_ids = [int(x) for x in (ev.get("news_ids") or [])]
+            if not news_ids:
+                continue
+            rows = await fetch_all(
+                sql.SQL(
+                    "SELECT {columns} FROM {news_table} n WHERE n.id = ANY(%(ids)s)"
+                ).format(columns=NEWS_COLUMNS, news_table=news_table),
+                {"ids": news_ids},
+            )
+            if not rows:
+                continue
+            rows.sort(key=lambda r: (int(r.get("views") or 0), r.get("date") or datetime.min), reverse=True)
+
+            raw = ev.get("raw_llm") if isinstance(ev.get("raw_llm"), dict) else {}
+            # НЕ наследуем прежний ragflow_used: иначе при --rewrite-all (повторная
+            # обработка уже сделанных событий) пустой ответ выглядел бы как «успех».
+            raw = {k: v for k, v in raw.items() if k not in ("ragflow_used", "post", "prompt_archetype")}
+            analysis: dict[str, Any] = {
+                "title": ev.get("title"),
+                "summary": ev.get("summary"),
+                "topics": list(ev.get("topics") or []),
+                "tags": list(ev.get("tags") or []),
+                "products": list(ev.get("products") or []),
+                "regions": list(ev.get("regions") or []),
+                "raw_llm": raw,
+            }
+            t0 = datetime.now()
+            logger.info("rewrite_articles: [%s/%s] событие id=%s (%s источн.) → RAGFlow…", idx, len(targets), ev["id"], len(rows))
+            analysis = await rewrite_event_article(analysis, rows)
+            took = (datetime.now() - t0).total_seconds()
+            if not (analysis.get("raw_llm") or {}).get("ragflow_used"):
+                failed += 1
+                logger.warning("rewrite_articles: [%s/%s] id=%s — пусто/ошибка за %.1fс, оставлен extractive", idx, len(targets), ev["id"], took)
+                continue
+
+            async with get_conn() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        sql.SQL(
+                            """
+                            UPDATE {events}
+                            SET title = %(title)s,
+                                summary = %(summary)s,
+                                raw_llm = %(raw_llm)s,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = %(id)s
+                            """
+                        ).format(events=events_t),
+                        {
+                            "id": int(ev["id"]),
+                            "title": analysis.get("title") or ev.get("title"),
+                            "summary": analysis.get("summary") or ev.get("summary"),
+                            "raw_llm": Jsonb(analysis.get("raw_llm") or {}),
+                        },
+                    )
+                await conn.commit()
+            updated += 1
+            logger.info("rewrite_articles: [%s/%s] id=%s — статья готова за %.1fс", idx, len(targets), ev["id"], took)
+            if updated % 10 == 0:
+                logger.info("rewrite_articles: updated %s/%s events", updated, len(targets))
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            logger.warning("rewrite_articles: [%s/%s] id=%s — пропуск из-за ошибки: %s", idx, len(targets), ev.get("id"), exc)
+            continue
+
+    if updated:
+        cache_delete_prefix("events")
+    logger.info("rewrite_articles done: updated=%s failed=%s total=%s", updated, failed, len(targets))
+    return {"status": "ok", "updated": updated, "failed": failed, "candidates": len(targets)}
+
+
 async def process_events_once() -> dict[str, Any]:
     await ensure_event_schema()
     rows = await fetch_unprocessed_news()
@@ -770,6 +892,10 @@ async def process_events_once() -> dict[str, Any]:
             continue
         event_key = _event_key_from_cluster(group_rows)
         analysis = await analyzer(event_key, group_rows)
+        if settings.ragflow_active:
+            from app.services.ragflow_writer import rewrite_event_article
+
+            analysis = await rewrite_event_article(analysis, group_rows)
         await upsert_event_from_group(event_key, group_rows, analysis)
         for r in group_rows:
             if r.get("id") is not None:
@@ -1143,13 +1269,74 @@ async def event_sources(event_id: int, limit: int = 50) -> list[dict[str, Any]]:
     return cache_set(cache_key, items, 120)
 
 
+async def event_news_rows(event_id: int) -> list[dict[str, Any]]:
+    """Исходные новости события (по events.news_ids) — для превью-генерации статьи."""
+    await ensure_event_schema()
+    row = await fetch_one(
+        sql.SQL("SELECT news_ids FROM {events} WHERE id = %(eid)s").format(
+            events=event_table_identifier("events")
+        ),
+        {"eid": int(event_id)},
+    )
+    news_ids = [int(x) for x in ((row or {}).get("news_ids") or [])]
+    if not news_ids:
+        return []
+    news_table = await news_table_identifier()
+    rows = await fetch_all(
+        sql.SQL("SELECT {columns} FROM {news_table} n WHERE n.id = ANY(%(ids)s)").format(
+            columns=NEWS_COLUMNS, news_table=news_table
+        ),
+        {"ids": news_ids},
+    )
+    rows.sort(key=lambda r: (int(r.get("views") or 0), r.get("date") or datetime.min), reverse=True)
+    return rows
+
+
+async def lab_events(q: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """Лёгкий список активных событий (id, заголовок, дата, кол-во новостей) для тест-страницы."""
+    await ensure_event_schema()
+    where = sql.SQL("status = 'active' AND array_length(news_ids, 1) > 0")
+    params: dict[str, Any] = {"limit": max(1, min(int(limit), 500))}
+    if q and q.strip():
+        params["q"] = f"%{q.strip().lower()}%"
+        where = where + sql.SQL(" AND LOWER(title) LIKE %(q)s")
+    rows = await fetch_all(
+        sql.SQL(
+            """
+            SELECT id, title, date_to, news_count, COALESCE(array_length(news_ids,1),0) AS src
+            FROM {events}
+            WHERE {where}
+            ORDER BY date_to DESC NULLS LAST, id DESC
+            LIMIT %(limit)s
+            """
+        ).format(events=event_table_identifier("events"), where=where),
+        params,
+    )
+    return [
+        {
+            "id": int(r["id"]),
+            "title": r.get("title") or "",
+            "date_to": r["date_to"].isoformat() if r.get("date_to") else None,
+            "news_count": int(r.get("news_count") or 0),
+            "sources": int(r.get("src") or 0),
+        }
+        for r in rows
+    ]
+
+
 async def event_detail(event_id: int) -> dict[str, Any]:
-    """Источники + impacts по ролям одного события (для шапки страницы чтения)."""
-    cache_key = ("event_detail_v1", int(event_id))
+    """Заголовок, статья (summary), источники и impacts одного события — для страницы чтения."""
+    cache_key = ("event_detail_v2", int(event_id))
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
     await ensure_event_schema()
+    ev_row = await fetch_one(
+        sql.SQL("SELECT title, summary FROM {events} WHERE id = %(eid)s").format(
+            events=event_table_identifier("events")
+        ),
+        {"eid": int(event_id)},
+    )
     srcs = await event_sources(event_id)
     impact_rows = await fetch_all(
         sql.SQL(
@@ -1172,7 +1359,16 @@ async def event_detail(event_id: int) -> dict[str, Any]:
         }
         for r in impact_rows
     ]
-    return cache_set(cache_key, {"sources": srcs, "impacts": impacts}, 120)
+    return cache_set(
+        cache_key,
+        {
+            "title": (ev_row or {}).get("title") or "",
+            "article": (ev_row or {}).get("summary") or "",
+            "sources": srcs,
+            "impacts": impacts,
+        },
+        120,
+    )
 
 
 async def events_stats() -> dict[str, Any]:
@@ -1434,7 +1630,28 @@ async def full_event_graph(focus_news_id: int | None = None) -> dict[str, Any]:
                     best_id = max(result["nodes"], key=lambda nd: nd["sg"])["id"]
             focus_event_id = best_id
 
-    return {**result, "focus_event_id": focus_event_id}
+    # Полную статью и заголовок фокус-события кладём прямо в ответ (только для фокуса —
+    # чтобы не раздувать кэш графа). Так страница чтения показывает полный текст уже
+    # после загрузки графа, без отдельного запроса (убирает «моргание» короткого текста).
+    focus_title = ""
+    focus_article = ""
+    if focus_event_id is not None:
+        frow2 = await fetch_one(
+            sql.SQL("SELECT title, summary FROM {events} WHERE id = %(eid)s").format(
+                events=event_table_identifier("events")
+            ),
+            {"eid": int(focus_event_id)},
+        )
+        if frow2:
+            focus_title = frow2.get("title") or ""
+            focus_article = frow2.get("summary") or ""
+
+    return {
+        **result,
+        "focus_event_id": focus_event_id,
+        "focus_title": focus_title,
+        "focus_article": focus_article,
+    }
 
 
 # ─── Story timeline (эго-граф сюжета вокруг события) ───────────────────────────

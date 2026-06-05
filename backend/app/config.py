@@ -108,6 +108,43 @@ class Settings:
     event_prune_inactive_enabled: bool = os.getenv("EVENT_PRUNE_INACTIVE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     event_prune_inactive_days: int = int(os.getenv("EVENT_PRUNE_INACTIVE_DAYS", "5"))
 
+    # ── RAGFlow: переписывание события в связную статью (заголовок + текст) ──
+    # Перед записью события worker отправляет все его источники в RAGFlow и получает
+    # цельную статью на русском (заголовок + полный текст по фактам из источников).
+    # По умолчанию ВЫКЛЮЧЕНО — включается только когда заданы URL и ключ. При любой
+    # ошибке или таймауте остаётся прежний extractive-заголовок/summary (fallback).
+    ragflow_enabled: bool = os.getenv("EVENT_RAGFLOW_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    ragflow_base_url: str = os.getenv("RAGFLOW_BASE_URL", "")
+    ragflow_api_key: str = os.getenv("RAGFLOW_API_KEY", "")
+    # Если задан RAGFLOW_CHAT_ID — используется готовый ассистент; иначе worker
+    # создаёт/находит ассистента по имени RAGFLOW_CHAT_NAME (без датасетов).
+    ragflow_chat_id: str = os.getenv("RAGFLOW_CHAT_ID", "")
+    ragflow_chat_name: str = os.getenv("RAGFLOW_CHAT_NAME", "harvester-event-writer")
+    ragflow_llm_id: str = os.getenv("RAGFLOW_LLM_ID", "")  # пусто → дефолтная модель тенанта
+    ragflow_temperature: float = float(os.getenv("RAGFLOW_TEMPERATURE", "0.4"))
+    # ВАЖНО: qwen3.5 — reasoning-модель (думает в <think> перед ответом). Лимит токенов
+    # тратится сначала на рассуждения (~2k), и при малом значении на сам текст ничего не
+    # остаётся (content пустой). Поэтому большой запас. RAGFlow берёт max_tokens из настроек
+    # ассистента, поэтому при изменении нужно ПЕРЕСОЗДАТЬ ассистента (см. README).
+    ragflow_max_tokens: int = int(os.getenv("RAGFLOW_MAX_TOKENS", "8000"))
+    # Общий дедлайн на событие (вмещает несколько попыток). Per-request timeout — внутри.
+    ragflow_timeout_seconds: int = int(os.getenv("RAGFLOW_TIMEOUT_SECONDS", "360"))
+    # Число попыток на событие: модель детерминирована, поэтому повтор идёт с варьирующим
+    # маркером (меняет вход → другую траекторию). Покрывает редкие пустые ответы qwen3.
+    ragflow_max_attempts: int = int(os.getenv("RAGFLOW_MAX_ATTEMPTS", "3"))
+    # Минимум уникальных источников, чтобы тратить LLM на статью (0 → event_min_sources).
+    ragflow_min_sources: int = int(os.getenv("RAGFLOW_MIN_SOURCES", "0"))
+    ragflow_max_sources: int = int(os.getenv("RAGFLOW_MAX_SOURCES", "12"))
+    ragflow_max_source_chars: int = int(os.getenv("RAGFLOW_MAX_SOURCE_CHARS", "2500"))
+
+    @property
+    def ragflow_active(self) -> bool:
+        return bool(self.ragflow_enabled and self.ragflow_base_url and self.ragflow_api_key)
+
+    @property
+    def ragflow_effective_min_sources(self) -> int:
+        return self.ragflow_min_sources if self.ragflow_min_sources > 0 else self.event_min_sources
+
     # Pixabay API для фоновых изображений карточек новостей.
     # Получить бесплатно: https://pixabay.com/api/
     # Если пустой — карточки генерируются с зелёным градиентом (fallback).

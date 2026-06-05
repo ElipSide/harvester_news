@@ -162,6 +162,8 @@ export type FullGraphResponse = {
   edges: FullGraphEdge[];
   stories: FullGraphStory[];
   focus_event_id: number | null;
+  focus_title?: string;
+  focus_article?: string;
 };
 
 

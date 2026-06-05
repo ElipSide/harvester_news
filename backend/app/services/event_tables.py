@@ -242,6 +242,11 @@ async def ensure_event_schema() -> None:
                 ).format(sql.Identifier(schema_name), sql.Identifier(schema_name))
             )
 
+            # Денормализованный список id новостей, из которых состоит событие
+            # (дублирует event_sources.news_id для удобного доступа одной строкой).
+            # Заполняется в upsert_event_from_group из event_sources.
+            await cur.execute(sql.SQL("ALTER TABLE {}.events ADD COLUMN IF NOT EXISTS news_ids INTEGER[] NOT NULL DEFAULT '{{}}'").format(sql.Identifier(schema_name)))
+
             # Привязка события к сюжету-дереву (≤1 сюжет на событие на практике).
             await cur.execute(sql.SQL("ALTER TABLE {}.events ADD COLUMN IF NOT EXISTS story_id BIGINT").format(sql.Identifier(schema_name)))
             await cur.execute(sql.SQL("ALTER TABLE {}.events ADD COLUMN IF NOT EXISTS story_parent_id BIGINT").format(sql.Identifier(schema_name)))

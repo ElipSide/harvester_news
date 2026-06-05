@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import time
+import uuid
 from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Response
+from pydantic import BaseModel
 
 from app.schemas.news import EventListResponse, NewsListResponse, NewsMetaResponse, TimelineResponse
 from app.services_news import debug_db, featured_news, list_news, news_by_id, news_meta, similar_news, timeline, top_read_news
-from app.services_events import event_detail, event_story, events_stats, full_event_graph, list_events, list_events_graph
+from app.services_events import event_detail, event_news_rows, event_story, events_stats, full_event_graph, lab_events, list_events, list_events_graph
+from app.services.ragflow_writer import default_prompts, preview_article, source_previews
 from app.services_home import home_background_payload, home_fast_week_payload, home_initial_payload, home_payload
 from app.services_cache import cache_get, cache_set
 
@@ -262,6 +266,136 @@ async def event_stats_endpoint():
         return await events_stats()
     except Exception as exc:
         raise _db_error(exc) from exc
+
+
+@router.get("/events/lab/list")
+async def lab_events_endpoint(
+    q: str | None = Query(default=None, max_length=200),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """Список активных событий для тест-страницы промтов."""
+    try:
+        return {"items": await lab_events(q=q, limit=limit)}
+    except Exception as exc:
+        raise _db_error(exc) from exc
+
+
+@router.get("/events/lab/defaults")
+async def lab_defaults_endpoint():
+    """Текущие дефолтные промты и параметры — для предзаполнения тест-страницы."""
+    return default_prompts()
+
+
+@router.get("/events/lab/sources")
+async def lab_sources_endpoint(
+    event_id: int = Query(..., ge=1),
+    max_source_chars: int | None = Query(default=None, ge=100, le=20000),
+):
+    """Оригинальные тексты источников события — ровно в том виде, как их видит модель."""
+    try:
+        rows = await event_news_rows(event_id)
+        return {"event_id": event_id, "sources": source_previews(rows, max_source_chars)}
+    except Exception as exc:
+        raise _db_error(exc) from exc
+
+
+class _PreviewIn(BaseModel):
+    event_id: int
+    system_prompt: str | None = None
+    user_prompt: str | None = None
+    max_source_chars: int | None = None
+
+
+@router.post("/events/lab/preview")
+async def lab_preview_endpoint(payload: _PreviewIn):
+    """Синхронная генерация (legacy). Долгая — может упереться в таймаут nginx.
+    Фронт использует async-вариант ниже (/preview/start + /preview/result)."""
+    try:
+        rows = await event_news_rows(payload.event_id)
+        if not rows:
+            return {"ok": False, "error": "no_sources"}
+        return await preview_article(
+            rows,
+            system_prompt=payload.system_prompt,
+            user_prompt=payload.user_prompt,
+            max_source_chars=payload.max_source_chars,
+        )
+    except Exception as exc:
+        raise _db_error(exc) from exc
+
+
+# --- Async-генерация лаборатории: kick-off + polling -------------------------
+# RAGFlow генерит статью 50–360с. Держать одно HTTP-соединение так долго нельзя —
+# любой nginx по пути рвёт его по proxy_read_timeout (504). Поэтому POST /start
+# мгновенно отдаёт job_id и запускает генерацию в фоне, а фронт коротко поллит
+# GET /result. In-memory стор безопасен: backend — один uvicorn-процесс.
+_LAB_JOBS: dict[str, dict] = {}
+_LAB_TASKS: set[asyncio.Task] = set()
+_LAB_JOB_TTL = 1800.0  # сек: сколько храним завершённую задачу
+_LAB_JOBS_MAX = 200
+
+
+def _lab_jobs_prune() -> None:
+    now = time.monotonic()
+    stale = [
+        jid for jid, j in _LAB_JOBS.items()
+        if j.get("status") in ("done", "error") and (now - j.get("ts", now)) > _LAB_JOB_TTL
+    ]
+    for jid in stale:
+        _LAB_JOBS.pop(jid, None)
+    # Жёсткий предохранитель от утечки памяти.
+    if len(_LAB_JOBS) > _LAB_JOBS_MAX:
+        for jid in sorted(_LAB_JOBS, key=lambda k: _LAB_JOBS[k].get("ts", 0.0))[: len(_LAB_JOBS) - _LAB_JOBS_MAX]:
+            _LAB_JOBS.pop(jid, None)
+
+
+async def _lab_run_job(job_id: str, rows, system_prompt, user_prompt, max_source_chars) -> None:
+    try:
+        res = await preview_article(
+            rows,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_source_chars=max_source_chars,
+        )
+        _LAB_JOBS[job_id] = {"status": "done", "result": res, "ts": time.monotonic()}
+    except Exception as exc:  # noqa: BLE001 — фон-задача не должна падать молча
+        _LAB_JOBS[job_id] = {
+            "status": "error",
+            "result": {"ok": False, "error": str(exc)},
+            "ts": time.monotonic(),
+        }
+
+
+@router.post("/events/lab/preview/start")
+async def lab_preview_start_endpoint(payload: _PreviewIn):
+    """Запускает генерацию в фоне, мгновенно возвращает job_id."""
+    try:
+        rows = await event_news_rows(payload.event_id)
+    except Exception as exc:
+        raise _db_error(exc) from exc
+    if not rows:
+        return {"ok": False, "error": "no_sources"}
+
+    _lab_jobs_prune()
+    job_id = uuid.uuid4().hex
+    _LAB_JOBS[job_id] = {"status": "running", "result": None, "ts": time.monotonic()}
+    task = asyncio.create_task(
+        _lab_run_job(job_id, rows, payload.system_prompt, payload.user_prompt, payload.max_source_chars)
+    )
+    _LAB_TASKS.add(task)
+    task.add_done_callback(_LAB_TASKS.discard)
+    return {"ok": True, "job_id": job_id, "status": "running"}
+
+
+@router.get("/events/lab/preview/result")
+async def lab_preview_result_endpoint(job_id: str = Query(..., min_length=8, max_length=64)):
+    """Опрос статуса фоновой генерации."""
+    job = _LAB_JOBS.get(job_id)
+    if job is None:
+        return {"status": "unknown"}
+    if job["status"] == "running":
+        return {"status": "running"}
+    return {"status": job["status"], "result": job["result"]}
 
 
 @router.get("/events/{event_id}/detail")
