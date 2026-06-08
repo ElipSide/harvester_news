@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from psycopg import sql
@@ -8,6 +9,13 @@ from psycopg.types.json import Jsonb
 from app.config import settings
 from app.db.db_ext import get_conn
 from app.db.db_ext_func import fetch_all, fetch_one, fetch_val
+
+# DDL событий идемпотентен, но КАЖДЫЙ его прогон — это десятки последовательных
+# round-trip'ов к удалённому PostgreSQL (~7с суммарно). Раньше ensure_event_schema
+# вызывался на каждый запрос API → главный тормоз страницы чтения (event_detail = 14с).
+# Мемоизируем: схема создаётся один раз на процесс, дальше вызовы — мгновенный no-op.
+_schema_ready = False
+_schema_lock = asyncio.Lock()
 
 
 def event_schema_identifier() -> sql.Identifier:
@@ -25,6 +33,18 @@ async def ensure_event_schema() -> None:
     существующей `news_list`. Backend и worker вызывают эту функцию безопасно
     при старте.
     """
+    global _schema_ready
+    if _schema_ready:
+        return
+    async with _schema_lock:
+        if _schema_ready:  # пока ждали лок, другой корутин мог всё создать
+            return
+        await _create_event_schema()
+        _schema_ready = True
+
+
+async def _create_event_schema() -> None:
+    """Собственно DDL событий (идемпотентно). Вызывается один раз через ensure_event_schema."""
     schema_name = settings.events_schema
     async with get_conn() as conn:
         async with conn.cursor() as cur:

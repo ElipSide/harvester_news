@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+import asyncio
 import hashlib
 import logging
 import math
@@ -1331,23 +1332,27 @@ async def event_detail(event_id: int) -> dict[str, Any]:
     if cached is not None:
         return cached
     await ensure_event_schema()
-    ev_row = await fetch_one(
-        sql.SQL("SELECT title, summary FROM {events} WHERE id = %(eid)s").format(
-            events=event_table_identifier("events")
+    # 3 независимых запроса параллельно (пул соединений) — на удалённой БД каждый
+    # round-trip ~0.45с, поэтому gather срезает время втрое против последовательных.
+    ev_row, srcs, impact_rows = await asyncio.gather(
+        fetch_one(
+            sql.SQL("SELECT title, summary FROM {events} WHERE id = %(eid)s").format(
+                events=event_table_identifier("events")
+            ),
+            {"eid": int(event_id)},
         ),
-        {"eid": int(event_id)},
-    )
-    srcs = await event_sources(event_id)
-    impact_rows = await fetch_all(
-        sql.SQL(
-            """
-            SELECT role, label, impact, summary, action_hint
-            FROM {impacts}
-            WHERE event_id = %(eid)s
-            ORDER BY role
-            """
-        ).format(impacts=event_table_identifier("event_impacts")),
-        {"eid": int(event_id)},
+        event_sources(event_id),
+        fetch_all(
+            sql.SQL(
+                """
+                SELECT role, label, impact, summary, action_hint
+                FROM {impacts}
+                WHERE event_id = %(eid)s
+                ORDER BY role
+                """
+            ).format(impacts=event_table_identifier("event_impacts")),
+            {"eid": int(event_id)},
+        ),
     )
     impacts = [
         {
@@ -1450,7 +1455,9 @@ async def list_events_graph(
                 }
                 for r in egr_rows
             ]
-            return cache_set(cache_key, {"total": len(items), "items": items}, 60)
+            # TTL с запасом (> интервала фонового прогрева 120с): граф главной без
+            # фильтров держится тёплым, холодную выборку платит фон, а не пользователь.
+            return cache_set(cache_key, {"total": len(items), "items": items}, 300)
         # проекция ещё не построена → падаем на обычный путь по events
 
     where, params = await _event_filters(
@@ -1571,7 +1578,9 @@ async def full_event_graph(focus_news_id: int | None = None) -> dict[str, Any]:
         ]
 
         result = {"nodes": nodes, "edges": edges, "stories": stories}
-        cache_set(cache_key, result, 120)
+        # TTL с запасом: тяжёлый граф (~3с холодной сборки) фоново прогревается
+        # card_warmer'ом каждые 120с, поэтому до пользователя холодная сборка не доходит.
+        cache_set(cache_key, result, 600)
 
     focus_event_id = None
     if focus_news_id is not None:

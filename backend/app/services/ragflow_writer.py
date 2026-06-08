@@ -625,21 +625,25 @@ def _preview_sync(
     usage = None
     attempts_used = 0
     used_fallback = False
-    total = settings.ragflow_max_attempts
+    # В лаборатории даём БОЛЬШЕ попыток, чем воркеру: пустой ответ reasoning-модели
+    # недетерминирован, а здесь важно почти всегда что-то показать. Последние ДВЕ попытки —
+    # plain-text без JSON (эта форма пустует заметно реже), остальные — твой промт как есть.
+    total = max(settings.ragflow_max_attempts, 4)
+    plain_from = total - 2  # с этой попытки и далее — plain-text
     # Лок: между записью промта и POST'ом другой тест-запрос не должен перезаписать промт
     # ассистента. Покрывает все попытки (каждый POST заново читает сохранённый промт).
     with _lab_lock:
         _lab_set_prompt(chat, sys_text)
         for attempt in range(total):
             attempts_used = attempt + 1
-            if attempt == 0:
+            is_fallback_attempt = attempt >= plain_from
+            if is_fallback_attempt:
+                # plain-text без JSON; маркер на последней попытке варьирует ввод.
+                body["messages"][1]["content"] = plain_text_usr if attempt == plain_from else f"{plain_text_usr}\n\n(Повтор {attempt}.)"
+            elif attempt == 0:
                 body["messages"][1]["content"] = usr_text
-            elif attempt < total - 1:
-                body["messages"][1]["content"] = f"{usr_text}\n\n(Повтор {attempt}.)"
             else:
-                # Последняя попытка: plain-text без JSON — лом против настоящих пустых ответов.
-                body["messages"][1]["content"] = plain_text_usr
-            is_fallback_attempt = attempt == total - 1
+                body["messages"][1]["content"] = f"{usr_text}\n\n(Повтор {attempt}.)"
             try:
                 resp = requests.post(
                     url,
@@ -698,7 +702,8 @@ async def preview_article(
     # лаборатории бюджет под ВСЕ попытки целиком — иначе outer-timeout рубит 2-ю/3-ю.
     # Лаборатория асинхронная (poll), длинное ожидание здесь приемлемо.
     per_attempt = max(30, min(300, settings.ragflow_timeout_seconds - 5))
-    lab_timeout = settings.ragflow_max_attempts * per_attempt + 30
+    lab_attempts = max(settings.ragflow_max_attempts, 4)  # синхронно с _preview_sync
+    lab_timeout = lab_attempts * per_attempt + 30
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(_preview_sync, rows, system_prompt, user_prompt, max_source_chars),

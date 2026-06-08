@@ -24,12 +24,19 @@ async def _prewarm_cache() -> None:
     """Греем кэш первого экрана при старте, чтобы первый пользователь после
     деплоя не платил полную цену запросов к удалённой БД."""
     try:
+        from app.services_events import full_event_graph, list_events_graph  # lazy: избегаем цикла импорта
+        from app.services_home import home_background_payload
         await asyncio.gather(
             home_initial_payload(
                 q=None, topic=[], tag=[], region=None, product=None,
                 source=None, has_photo=None, sort_name="date_desc", role=None,
             ),
             news_meta(),
+            full_event_graph(None),  # тяжёлый граф страницы чтения (~3с)
+            # Фоновый экран главной: timeline(365) (~12с холодных) + meta/featured/top_read.
+            home_background_payload(topic=[], tag=[], region=None, product=None, source=None),
+            # Граф событий на главной (limit=1000, без фильтров — как зовёт App).
+            list_events_graph(topic=[], tag=[], limit=1000),
         )
         logger.info("cache prewarm done")
     except Exception as exc:  # прогрев не должен валить старт

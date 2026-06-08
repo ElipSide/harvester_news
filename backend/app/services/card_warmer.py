@@ -364,8 +364,24 @@ def _first_topic(topics: Any) -> str | None:
     return None
 
 
+async def _warm_heavy_caches() -> None:
+    """Держит тёплыми тяжёлые кэши, чтобы холодную сборку платил фон, а не пользователь:
+    граф страницы чтения (~3с), фоновый экран главной timeline(365) (~12с) и граф главной."""
+    try:
+        from app.services_events import full_event_graph, list_events_graph  # lazy: цикл импорта
+        from app.services_home import home_background_payload
+        await asyncio.gather(
+            full_event_graph(None),
+            home_background_payload(topic=[], tag=[], region=None, product=None, source=None),
+            list_events_graph(topic=[], tag=[], limit=1000),
+        )
+    except Exception:
+        logger.debug("heavy cache warm failed (non-fatal)", exc_info=True)
+
+
 async def card_warmer_loop() -> None:
     await asyncio.sleep(15)  # дать пулу БД подняться
     while True:
         await warm_featured_cards()
+        await _warm_heavy_caches()
         await asyncio.sleep(_WARM_INTERVAL)
